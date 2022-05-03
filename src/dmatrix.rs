@@ -209,12 +209,15 @@ impl DMatrix {
     /// 0 1:0 8:0.22 11:1
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
-        dbg!("Loading DMatrix from: {}", path.as_ref().display());
+        let path_without_format = format!("{}?format=csv", path.as_ref().display().to_string());
+        let path_with_format = Path::new(&path_without_format);
+        let path_as_bytes = path_with_format.as_os_str().as_bytes();
+        dbg!(&path_with_format);
         let mut handle = ptr::null_mut();
-        let fname = ffi::CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
+        let path_cstr = ffi::CString::new(path_as_bytes).unwrap();
         let silent = true;
         xgb_call!(xgboost_bib::XGDMatrixCreateFromFile(
-            fname.as_ptr(),
+            path_cstr.as_ptr(),
             silent as i32,
             &mut handle
         ))?;
@@ -503,7 +506,6 @@ mod tests {
 
         assert_eq!(dmat.shape(), (4, 2));
 
-        
         assert_eq!(dmat.slice(&[]).unwrap().shape(), (0, 2));
         assert_eq!(dmat.slice(&[1]).unwrap().shape(), (1, 2));
         assert_eq!(dmat.slice(&[0, 1]).unwrap().shape(), (2, 2));
