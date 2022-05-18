@@ -1,3 +1,4 @@
 [submodule "xgboost-bib"]
 	path = xgboost-bib
-	url = https://github.com/MarWeUMR/xgboost-bib
+  url = https://github.com/MarWeUMR/xgboost-bib
+  branch = debug
