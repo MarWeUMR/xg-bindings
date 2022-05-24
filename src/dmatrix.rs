@@ -87,7 +87,6 @@ impl DMatrix {
         let mut out = 0;
         xgb_call!(xgboost_bib::XGDMatrixNumCol(handle, &mut out))?;
         let num_cols = out as usize;
-
         info!("Loaded DMatrix with shape: {}x{}", num_rows, num_cols);
         Ok(DMatrix {
             handle,
@@ -209,10 +208,9 @@ impl DMatrix {
     /// 0 1:0 8:0.22 11:1
     /// ```
     pub fn load<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
-        let path_without_format = format!("{}?format=csv", path.as_ref().display().to_string());
-        let path_with_format = Path::new(&path_without_format);
-        let path_as_bytes = path_with_format.as_os_str().as_bytes();
-        dbg!(&path_with_format);
+        let path_as_string = path.as_ref().display().to_string();
+        let path_as_bytes = Path::new(&path_as_string).as_os_str().as_bytes();
+
         let mut handle = ptr::null_mut();
         let path_cstr = ffi::CString::new(path_as_bytes).unwrap();
         let silent = true;
@@ -376,7 +374,7 @@ mod tests {
     use tempfile;
     fn read_train_matrix() -> XGBResult<DMatrix> {
         println!("loading mat");
-        DMatrix::load("xgboost-bib/xgboost/demo/data/agaricus.txt.train")
+        DMatrix::load("data.csv?format=csv")
     }
 
     #[test]
@@ -386,12 +384,12 @@ mod tests {
 
     #[test]
     fn read_num_rows() {
-        assert_eq!(read_train_matrix().unwrap().num_rows(), 6513);
+        assert_eq!(read_train_matrix().unwrap().num_rows(), 150);
     }
 
     #[test]
     fn read_num_cols() {
-        assert_eq!(read_train_matrix().unwrap().num_cols(), 127);
+        assert_eq!(read_train_matrix().unwrap().num_cols(), 5);
     }
 
     #[test]
@@ -412,7 +410,7 @@ mod tests {
     #[test]
     fn get_set_labels() {
         let mut dmat = read_train_matrix().unwrap();
-        assert_eq!(dmat.get_labels().unwrap().len(), 6513);
+        assert_eq!(dmat.get_labels().unwrap().len(), 150);
         let labels = vec![0.0; dmat.get_labels().unwrap().len()];
         assert!(dmat.set_labels(&labels).is_ok());
         assert_eq!(dmat.get_labels().unwrap(), labels);

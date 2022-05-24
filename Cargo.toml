@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 xgboost-bib =  {git = "https://github.com/MarWeUMR/xgboost-bib"}
-# xgboost-bib =  {path = "xgboost-bib"}
 libc = "*"
 derive_builder = "0.5"
 log = "0.4"
