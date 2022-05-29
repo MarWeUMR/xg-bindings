@@ -70,6 +70,7 @@ macro_rules! xgb_call {
         XGBError::check_return_value(unsafe { $x })
     };
 }
+mod diter;
 
 mod error;
 pub use error::{XGBResult, XGBError};
