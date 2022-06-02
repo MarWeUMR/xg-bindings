@@ -12,23 +12,29 @@ use xgboost_bib::DMatrixHandle;
 #[derive(Debug)]
 #[repr(C)]
 pub struct DIter {
-    // pub(super) handle: xgboost_bib::DataIterHandle,
+    pub(super) handle: xgboost_bib::DataIterHandle,
     n: usize,
     lengths: usize,
     cur_it: usize,
-    proxy: DMatrixHandle,
-    data: ArrayBase<OwnedRepr<f32>, Dim<[usize; 2]>>,
-    labels: ArrayBase<OwnedRepr<f32>, Dim<[usize; 2]>>,
+    proxy: *mut ffi::c_void,
+    data: [[f32; 3]; 2],
+    labels: [[f32; 3]; 2],
+    // labels: ArrayBase<OwnedRepr<f32>, Dim<[usize; 2]>>,
 }
 
 impl DIter {
     /// Construct a new instance from a DMatrixHandle created by the XGBoost C API.
-    // fn new(handle: xgboost_bib::DataIterHandle, handle2: &mut xgboost_bib::DMatrixHandle) -> XGBResult<Self> {
-    fn new(handle2: &mut xgboost_bib::DMatrixHandle) -> XGBResult<Self> {
-        let proxy_handle = handle2;
-        let proxi = unsafe { xgboost_bib::XGProxyDMatrixCreate(proxy_handle as *mut *mut _) };
-        println!("create proxy: {:?}", proxi);
+    fn new(
+        iter_handle: xgboost_bib::DataIterHandle,
+        mut proxy_handle: xgboost_bib::DMatrixHandle,
+    ) -> XGBResult<Self> {
+        // println!("proxy pointer in init (before) -> {:p}", proxy_handle);
+        // fn new(handle2: &mut xgboost_bib::DMatrixHandle) -> XGBResult<Self> {
+        // let proxy_handle = ptr::null_mut();
+        let proxi = unsafe { xgboost_bib::XGProxyDMatrixCreate(&mut proxy_handle) };
+        // println!("create proxy: {:?}", proxi);
 
+        // println!("proxy pointer in init (after) -> {:p}", proxy_handle);
         let data = arr2(&[
             [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
             [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
@@ -38,27 +44,28 @@ impl DIter {
             [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
         ]);
 
+        let d = [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]];
+        let l = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]];
+
         let labels = arr2(&[[16.0], [16.0], [16.0], [16.0], [16.0], [16.0]]);
 
         Ok(DIter {
-            n: 3,
+            handle: iter_handle,
+            n: 2,
             lengths: 2,
             cur_it: 0,
-            proxy: *proxy_handle,
-            data,
-            labels,
+            proxy: proxy_handle,
+            data: d,
+            labels: l,
         })
     }
-
-    // fn reset(&mut self) {
-    //     self.cur_it = 0;
-    // }
 
     #[no_mangle]
     pub extern "C" fn reset(handle: *mut ffi::c_void) {
         let data_iter: &mut DIter = unsafe { &mut *(handle as *mut DIter) };
 
-        println!("Setting cur_it to zero");
+        // println!("Setting cur_it to zero");
+        // println!("current it: {:?}", data_iter.cur_it);
 
         data_iter.cur_it = 0;
     }
@@ -68,50 +75,98 @@ impl DIter {
         let data_iter: &mut DIter = unsafe { &mut *(handle as *mut DIter) };
 
         if data_iter.n == data_iter.cur_it {
+            data_iter.cur_it = 0;
             return 0;
         } else {
-            let array_config = ffi::CString::new(
-                r#"{"data": [1,false], "shape": [2, 1], "typestr": "<f4", "version": 3}"#,
-            )
-            .unwrap();
+            let data_ptr: *mut ffi::c_void =
+                &mut data_iter.data[data_iter.cur_it] as *mut _ as *mut ffi::c_void;
+            let lbl_ptr: *mut ffi::c_void =
+                &mut data_iter.labels[data_iter.cur_it] as *mut _ as *mut ffi::c_void;
+
+            let data_ptr_address = data_ptr as usize;
+
+            let array_config = format!(
+                "
+                {{ \"data\": [{data_ptr_address},false], \"shape\": [3, 1], \"typestr\": \"<f4\", \"version\": 3}}
+                "
+            );
+
+            let array_config_cstr = ffi::CString::new(array_config).unwrap();
             let field = ffi::CString::new(r#"label"#).unwrap();
 
-            // let mut data = &[1.0, 2.0, 3.0, 4.0, 5.0, 3.0];
-            let data_ptr: *mut ffi::c_void = &mut data_iter.data.row(0) as *mut _ as *mut ffi::c_void;
-
             let dense_data = unsafe {
-                xgboost_bib::XGProxyDMatrixSetDataDense(data_iter.proxy, array_config.as_ptr())
+                xgboost_bib::XGProxyDMatrixSetDataDense(data_iter.proxy, array_config_cstr.as_ptr())
             };
             let dense_info = unsafe {
-                xgboost_bib::XGDMatrixSetDenseInfo(data_iter.proxy, field.as_ptr(), data_ptr, 2, 1)
+                xgboost_bib::XGDMatrixSetDenseInfo(
+                    data_iter.proxy,
+                    field.as_ptr(),
+                    lbl_ptr,
+                    3 as u64,
+                    1,
+                )
             };
 
-            println!("set dense data: {:?}", dense_data);
-            println!("set dense info: {:?}", dense_info);
+            // println!("proxy pointer after next -> {:p}", data_iter.proxy);
+            // println!("set dense data: {:?}", dense_data);
+            // println!("set dense info: {:?}", dense_info);
 
+            data_iter.cur_it += 1;
             return 1;
         }
+    }
+    fn free(&mut self) {
+        drop(self);
     }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use crate::DMatrix;
+
     use super::*;
+    use xgboost_bib::*;
+
+    fn train_model(xy: DMatrix) {
+        let s = vec![xy.handle];
+        let mut bst_handle = ptr::null_mut();
+        let booster_create =
+            unsafe { xgboost_bib::XGBoosterCreate(s.as_ptr(), 1, &mut bst_handle) };
+
+        let name_cstr = ffi::CString::new("tree_method").unwrap();
+        let value_cstr = ffi::CString::new("approx").unwrap();
+
+        let booster_set_param = unsafe {
+            xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
+        };
+
+        let name_cstr = ffi::CString::new("objective").unwrap();
+        let value_cstr = ffi::CString::new("reg:squarederror").unwrap();
+
+        
+        let  booster_set_param = unsafe {
+            xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
+        };
+    }
 
     #[test]
     fn data_iter() {
-        // let mut hd = ptr::null_mut();
-        let mut hd2 = ptr::null_mut();
-        let mut iter = DIter::new(&mut hd2).unwrap();
+        let iter_handle = ptr::null_mut();
+        let proxy_handle = ptr::null_mut();
+        // println!("proxy pointer pre init -> {:p}", proxy_handle);
+        let mut iter = DIter::new(iter_handle, proxy_handle).unwrap();
+
+        // println!("proxy pointer post init -> {:p}", proxy_handle);
+        // println!("proxy pointer post init from struct -> {:p}", iter.proxy);
 
         let iter_ptr: *mut ffi::c_void = &mut iter as *mut _ as *mut ffi::c_void;
-        let proxy_ptr: *mut ffi::c_void = &mut iter.proxy as *mut _ as *mut ffi::c_void;
+        // let proxy_ptr: *mut ffi::c_void = &mut iter.proxy as *mut _ as *mut ffi::c_void;
 
         let config = ffi::CString::new("{\"missing\": NaN, \"cache_prefix\": \"cache\"}").unwrap();
-        let mut dm_handle = ptr::null_mut();
+        let mut dm_handle: DMatrixHandle = ptr::null_mut();
 
-        // DIter::re(di_ptr);
+        // println!("proxy pointer 3 -> {:p}", proxy_ptr);
 
         let iii = unsafe {
             xgboost_bib::XGDMatrixCreateFromCallback(
@@ -123,6 +178,7 @@ mod tests {
                 &mut dm_handle,
             )
         };
+
 
         println!("create from callback: {:?}", iii);
     }
