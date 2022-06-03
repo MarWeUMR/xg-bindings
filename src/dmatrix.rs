@@ -757,47 +757,53 @@ mod tests {
         drop(booster);
     }
     fn train_model(xy: DMatrix) {
-        let s = vec![xy.handle];
+        let mut s = vec![xy.handle];
         let mut bst_handle = ptr::null_mut();
-        let booster_create =
+        let _booster_create =
             unsafe { xgboost_bib::XGBoosterCreate(s.as_ptr(), 1, &mut bst_handle) };
 
         let name_cstr = ffi::CString::new("tree_method").unwrap();
         let value_cstr = ffi::CString::new("approx").unwrap();
 
-        let booster_set_param = unsafe {
+        let _booster_set_param = unsafe {
             xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
         };
 
         let name_cstr = ffi::CString::new("objective").unwrap();
         let value_cstr = ffi::CString::new("reg:squarederror").unwrap();
 
-        let booster_set_param = unsafe {
+        let _booster_set_param = unsafe {
             xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
         };
 
         // TODO:
-        let validation_names = ffi::CString::new("train").unwrap();
-        let validation_results = ffi::CString::new("").unwrap();
+        // let mut evnames: Vec<ffi::CString> = Vec::with_capacity(names.len());
+        let tr = ffi::CString::new("train").unwrap();
+        let mut validation_names: Vec<*const libc::c_char> = vec![tr.as_ptr()];
+
+        let mut validation_result = ptr::null();
+
         for i in 0..10 {
             unsafe {
                 xgboost_bib::XGBoosterUpdateOneIter(bst_handle, i, xy.handle);
                 xgboost_bib::XGBoosterEvalOneIter(
                     bst_handle,
                     i,
-                    s.as_ptr() as *mut *mut _ as *mut *mut ffi::c_void,
-                    &mut validation_names.as_ptr(),
+                    s.as_mut_ptr(),
+                    validation_names.as_mut_ptr(),
                     1,
-                    &mut validation_results.as_ptr(),
+                    &mut validation_result,
                 );
             }
 
-            let res_str = unsafe {
-                ffi::CStr::from_ptr(validation_results.as_ptr())
-                    .to_string_lossy()
-                    .into_owned()
+            let out = unsafe {
+                ffi::CStr::from_ptr(validation_result)
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
             };
-            println!("{:?}", res_str);
+
+            println!("{}", out);
         }
     }
     #[test]
