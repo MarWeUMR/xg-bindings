@@ -129,6 +129,147 @@ impl Booster {
         Ok(Booster { handle })
     }
 
+pub fn train_increment(params: &TrainingParameters, model_name: &str) -> XGBResult<Self> {
+        let cached_dmats = {
+            let mut dmats = vec![params.dtrain];
+            if let Some(eval_sets) = params.evaluation_sets {
+                for (dmat, _) in eval_sets {
+                    dmats.push(*dmat);
+                }
+            }
+            dmats
+        };
+
+        let path = Path::new(model_name);
+        let bytes = std::fs::read(&path).expect("read saved booster file");
+        let mut bst = Booster::load_buffer(&bytes[..]).expect("load booster from buffer");
+        // let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
+        //let num_parallel_tree = 1;
+
+        // load distributed code checkpoint from rabit
+        let version = bst.load_rabit_checkpoint()?;
+        debug!("Loaded Rabit checkpoint: version={}", version);
+        assert!(unsafe { xgboost_bib::RabitGetWorldSize() != 1 || version == 0 });
+
+        let _rank = unsafe { xgboost_bib::RabitGetRank() };
+        let start_iteration = version / 2;
+        //let mut nboost = start_iteration;
+
+        for i in start_iteration..params.boost_rounds as i32 {
+            // distributed code: need to resume to this point
+            // skip first update if a recovery step
+            if version % 2 == 0 {
+                if let Some(objective_fn) = params.custom_objective_fn {
+                    debug!("Boosting in round: {}", i);
+                    bst.update_custom(params.dtrain, objective_fn)?;
+                } else {
+                    debug!("Updating in round: {}", i);
+                    bst.update(params.dtrain, i)?;
+                }
+                bst.save_rabit_checkpoint()?;
+            }
+
+            assert!(unsafe {
+                xgboost_bib::RabitGetWorldSize() == 1
+                    || version == xgboost_bib::RabitVersionNumber()
+            });
+
+            //nboost += 1;
+
+            if let Some(eval_sets) = params.evaluation_sets {
+                let mut dmat_eval_results = bst.eval_set(eval_sets, i)?;
+
+                if let Some(eval_fn) = params.custom_evaluation_fn {
+                    let eval_name = "custom";
+                    for (dmat, dmat_name) in eval_sets {
+                        let margin = bst.predict_margin(dmat)?;
+                        let eval_result = eval_fn(&margin, dmat);
+                        let eval_results = dmat_eval_results
+                            .entry(eval_name.to_string())
+                            .or_insert_with(IndexMap::new);
+                        eval_results.insert(dmat_name.to_string(), eval_result);
+                    }
+                }
+
+                // convert to map of eval_name -> (dmat_name -> score)
+                let mut eval_dmat_results = BTreeMap::new();
+                for (dmat_name, eval_results) in &dmat_eval_results {
+                    for (eval_name, result) in eval_results {
+                        let dmat_results = eval_dmat_results
+                            .entry(eval_name)
+                            .or_insert_with(BTreeMap::new);
+                        dmat_results.insert(dmat_name, result);
+                    }
+                }
+
+                print!("[{}]", i);
+                for (eval_name, dmat_results) in eval_dmat_results {
+                    for (dmat_name, result) in dmat_results {
+                        print!("\t{}-{}:{}", dmat_name, eval_name, result);
+                    }
+                }
+                println!();
+            }
+        }
+
+        Ok(bst)
+    }
+
+    pub fn my_train(params: &TrainingParameters) -> XGBResult<Self> {
+        let cached_dmats = {
+            let mut dmats = vec![params.dtrain];
+            if let Some(eval_sets) = params.evaluation_sets {
+                for (dmat, _) in eval_sets {
+                    dmats.push(*dmat);
+                }
+            }
+            dmats
+        };
+
+        let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
+
+        for i in 0..params.boost_rounds as i32 {
+            bst.update(params.dtrain, i)?;
+
+            if let Some(eval_sets) = params.evaluation_sets {
+                let mut dmat_eval_results = bst.eval_set(eval_sets, i)?;
+
+                if let Some(eval_fn) = params.custom_evaluation_fn {
+                    let eval_name = "custom";
+                    for (dmat, dmat_name) in eval_sets {
+                        let margin = bst.predict_margin(dmat)?;
+                        let eval_result = eval_fn(&margin, dmat);
+                        let eval_results = dmat_eval_results
+                            .entry(eval_name.to_string())
+                            .or_insert_with(IndexMap::new);
+                        eval_results.insert(dmat_name.to_string(), eval_result);
+                    }
+                }
+
+                // convert to map of eval_name -> (dmat_name -> score)
+                let mut eval_dmat_results = BTreeMap::new();
+                for (dmat_name, eval_results) in &dmat_eval_results {
+                    for (eval_name, result) in eval_results {
+                        let dmat_results = eval_dmat_results
+                            .entry(eval_name)
+                            .or_insert_with(BTreeMap::new);
+                        dmat_results.insert(dmat_name, result);
+                    }
+                }
+
+                print!("[{}]", i);
+                for (eval_name, dmat_results) in eval_dmat_results {
+                    for (dmat_name, result) in dmat_results {
+                        print!("\t{}-{}:{}", dmat_name, eval_name, result);
+                    }
+                }
+                println!();
+            }
+        }
+
+        Ok(bst)
+    }
+
     /// Convenience function for creating/training a new Booster.
     ///
     /// This does the following:
