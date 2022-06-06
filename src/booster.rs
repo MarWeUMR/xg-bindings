@@ -1,13 +1,14 @@
 use crate::dmatrix::DMatrix;
 use crate::error::XGBError;
+use indexmap::IndexMap;
 use libc;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
 use std::{ffi, fmt, fs::File, ptr, slice};
-use indexmap::IndexMap;
 use tempfile;
 use xgboost_bib;
 
@@ -129,7 +130,7 @@ impl Booster {
         Ok(Booster { handle })
     }
 
-pub fn train_increment(params: &TrainingParameters, model_name: &str) -> XGBResult<Self> {
+    pub fn train_increment(params: &TrainingParameters, model_name: &str) -> XGBResult<Self> {
         let cached_dmats = {
             let mut dmats = vec![params.dtrain];
             if let Some(eval_sets) = params.evaluation_sets {
@@ -227,6 +228,8 @@ pub fn train_increment(params: &TrainingParameters, model_name: &str) -> XGBResu
         };
 
         let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
+
+        bst.save_config();
 
         for i in 0..params.boost_rounds as i32 {
             bst.update(params.dtrain, i)?;
@@ -364,6 +367,42 @@ pub fn train_increment(params: &TrainingParameters, model_name: &str) -> XGBResu
         }
 
         Ok(bst)
+    }
+
+    pub fn save_config(&self) {
+        /*
+        json_string = ctypes.c_char_p()
+        length = c_bst_ulong()
+        _check_call(_LIB.XGBoosterSaveJsonConfig(
+            self.handle,
+            ctypes.byref(length),
+            ctypes.byref(json_string)))
+        assert json_string.value is not None
+        result = json_string.value.decode()  # pylint: disable=no-member
+        return result
+        */
+
+        // let json_string: libc::c_char =
+        let mut length: u64 = 1;
+        let mut json_string = ptr::null();
+
+        let json = unsafe {
+            xgboost_bib::XGBoosterSaveJsonConfig(
+                self.handle,
+                &mut length,
+                &mut json_string,
+            )
+        };
+
+        let out = unsafe {
+                ffi::CStr::from_ptr(json_string)
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            };
+
+        println!("{}", json);
+        println!("{}", out);
     }
 
     /// Update this Booster's parameters.
@@ -1050,7 +1089,7 @@ mod tests {
 
         let test_metrics = booster.evaluate(&dmat_test).unwrap();
         assert!(*test_metrics.get("logloss").unwrap() - 0.00692 < eps);
-        assert!(*test_metrics.get("map@4-").unwrap() -  0.005155 < eps);
+        assert!(*test_metrics.get("map@4-").unwrap() - 0.005155 < eps);
 
         let v = booster.predict(&dmat_test).unwrap();
         assert_eq!(v.len(), dmat_test.num_rows());
@@ -1222,9 +1261,6 @@ mod tests {
         assert_eq!(Booster::parse_eval_string(s, &["train", "test"]), metrics);
     }
 
-    #[test] 
-    fn inc_train(){
-
-    }
-
+    #[test]
+    fn inc_train() {}
 }
