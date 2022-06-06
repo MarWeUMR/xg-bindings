@@ -798,13 +798,46 @@ impl Booster {
             "seed",
             "seed_per_iteration",
             "validate_parameters",
+            "num_parallel_tree",
+            "num_trees",
+            "size_leaf_vector",
+            "predictor",
+            "process_type",
+            "tree_method",
+            "updater",
+            "updater_seq",
+            "name",
+            "specified_updater",
+            "single_precision_histogram",
         ];
 
-        let values = vec!["0", "-1", "0", "0", "0", "0", "0", "1"];
+        let values = vec![
+            "0",
+            "-1",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "1",
+            "1",
+            "16",
+            "0",
+            "auto",
+            "default",
+            "hist",
+            "grow_quantile_histmaker",
+            "grow_quantile_histmaker",
+            "gbtree",
+            "false",
+            "0",
+        ];
 
         for (k, v) in zip(keys, values) {
             let name = ffi::CString::new(k).unwrap();
             let value = ffi::CString::new(v).unwrap();
+
+            println!("setting {:?} to {:?}", k, v);
 
             let _ = xgb_call!(xgboost_bib::XGBoosterSetParam(
                 self.handle,
