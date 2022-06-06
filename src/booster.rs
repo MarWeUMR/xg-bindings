@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use libc;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, BufReader, Write};
+use std::iter::zip;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -87,6 +88,7 @@ impl Booster {
 
         let mut booster = Booster { handle };
         booster.set_params(params)?;
+        booster.set_param_from_json();
         Ok(booster)
     }
 
@@ -387,19 +389,15 @@ impl Booster {
         let mut json_string = ptr::null();
 
         let json = unsafe {
-            xgboost_bib::XGBoosterSaveJsonConfig(
-                self.handle,
-                &mut length,
-                &mut json_string,
-            )
+            xgboost_bib::XGBoosterSaveJsonConfig(self.handle, &mut length, &mut json_string)
         };
 
         let out = unsafe {
-                ffi::CStr::from_ptr(json_string)
-                    .to_str()
-                    .unwrap()
-                    .to_owned()
-            };
+            ffi::CStr::from_ptr(json_string)
+                .to_str()
+                .unwrap()
+                .to_owned()
+        };
 
         println!("{}", json);
         println!("{}", out);
@@ -788,6 +786,32 @@ impl Booster {
 
     pub(crate) fn save_rabit_checkpoint(&self) -> XGBResult<()> {
         xgb_call!(xgboost_bib::XGBoosterSaveRabitCheckpoint(self.handle))
+    }
+
+    fn set_param_from_json(&self) {
+        let keys = vec![
+            "fail_on_invalid_gpu_id",
+            "gpu_id",
+            "n_jobs",
+            "nthread",
+            "random_state",
+            "seed",
+            "seed_per_iteration",
+            "validate_parameters",
+        ];
+
+        let values = vec!["0", "-1", "0", "0", "0", "0", "0", "1"];
+
+        for (k, v) in zip(keys, values) {
+            let name = ffi::CString::new(k).unwrap();
+            let value = ffi::CString::new(v).unwrap();
+
+            let _ = xgb_call!(xgboost_bib::XGBoosterSetParam(
+                self.handle,
+                name.as_ptr(),
+                value.as_ptr()
+            ));
+        }
     }
 
     fn set_param(&mut self, name: &str, value: &str) -> XGBResult<()> {
