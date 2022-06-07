@@ -70,6 +70,28 @@ impl Booster {
         Self::new_with_cached_dmats(params, &[])
     }
 
+    pub fn new_with_json_config(
+        params: &BoosterParameters,
+        dmats: &[&DMatrix],
+        keys: Vec<&str>,
+        values: Vec<&str>
+    ) -> XGBResult<Self> {
+        let mut handle = ptr::null_mut();
+        // TODO: check this is safe if any dmats are freed
+        let s: Vec<xgboost_bib::DMatrixHandle> = dmats.iter().map(|x| x.handle).collect();
+        xgb_call!(xgboost_bib::XGBoosterCreate(
+            s.as_ptr(),
+            dmats.len() as u64,
+            &mut handle
+        ))?;
+
+        let mut booster = Booster { handle };
+        // booster.set_params(params)?;
+        booster.set_param_from_json(keys, values);
+        Ok(booster)
+    }
+
+
     /// Create a new Booster model with given parameters and list of DMatrix to cache.
     ///
     /// Cached DMatrix can sometimes be used internally by XGBoost to speed up certain operations.
@@ -88,7 +110,6 @@ impl Booster {
 
         let mut booster = Booster { handle };
         booster.set_params(params)?;
-        booster.set_param_from_json();
         Ok(booster)
     }
 
@@ -218,7 +239,7 @@ impl Booster {
         Ok(bst)
     }
 
-    pub fn my_train(params: &TrainingParameters) -> XGBResult<Self> {
+    pub fn my_train(params: &TrainingParameters, keys: Vec<&str>, values: Vec<&str>) -> XGBResult<Self> {
         let cached_dmats = {
             let mut dmats = vec![params.dtrain];
             if let Some(eval_sets) = params.evaluation_sets {
@@ -229,11 +250,11 @@ impl Booster {
             dmats
         };
 
-        let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
+        // let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
+        let mut bst = Booster::new_with_json_config(&params.booster_params, &cached_dmats, keys, values)?;
 
-        bst.save_config();
 
-        for i in 0..params.boost_rounds as i32 {
+        for i in 0..16 {
             bst.update(params.dtrain, i)?;
 
             if let Some(eval_sets) = params.evaluation_sets {
@@ -272,6 +293,7 @@ impl Booster {
             }
         }
 
+        bst.save_config();
         Ok(bst)
     }
 
@@ -406,7 +428,7 @@ impl Booster {
     /// Update this Booster's parameters.
     pub fn set_params(&mut self, p: &BoosterParameters) -> XGBResult<()> {
         for (key, value) in p.as_string_pairs() {
-            debug!("Setting parameter: {}={}", &key, &value);
+            println!("challis: Setting parameter: {}={}", &key, &value);
             self.set_param(&key, &value)?;
         }
         Ok(())
@@ -788,50 +810,8 @@ impl Booster {
         xgb_call!(xgboost_bib::XGBoosterSaveRabitCheckpoint(self.handle))
     }
 
-    fn set_param_from_json(&self) {
-        let keys = vec![
-            "fail_on_invalid_gpu_id",
-            "gpu_id",
-            "n_jobs",
-            "nthread",
-            "random_state",
-            "seed",
-            "seed_per_iteration",
-            "validate_parameters",
-            "num_parallel_tree",
-            "num_trees",
-            "size_leaf_vector",
-            "predictor",
-            "process_type",
-            "tree_method",
-            "updater",
-            "updater_seq",
-            "name",
-            "specified_updater",
-            "single_precision_histogram",
-        ];
-
-        let values = vec![
-            "0",
-            "-1",
-            "0",
-            "0",
-            "0",
-            "0",
-            "0",
-            "1",
-            "1",
-            "16",
-            "0",
-            "auto",
-            "default",
-            "hist",
-            "grow_quantile_histmaker",
-            "grow_quantile_histmaker",
-            "gbtree",
-            "false",
-            "0",
-        ];
+    fn set_param_from_json(&mut self, keys: Vec<&str>, values: Vec<&str>) {
+        
 
         for (k, v) in zip(keys, values) {
             let name = ffi::CString::new(k).unwrap();
@@ -839,11 +819,10 @@ impl Booster {
 
             println!("setting {:?} to {:?}", k, v);
 
-            let _ = xgb_call!(xgboost_bib::XGBoosterSetParam(
-                self.handle,
-                name.as_ptr(),
-                value.as_ptr()
-            ));
+            let setting_ok = unsafe {
+                xgboost_bib::XGBoosterSetParam(self.handle, name.as_ptr(), value.as_ptr())
+            };
+            println!("setting ok? {:?}", setting_ok);
         }
     }
 
