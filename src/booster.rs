@@ -71,7 +71,6 @@ impl Booster {
     }
 
     pub fn new_with_json_config(
-        params: &BoosterParameters,
         dmats: &[&DMatrix],
         keys: Vec<&str>,
         values: Vec<&str>
@@ -86,7 +85,6 @@ impl Booster {
         ))?;
 
         let mut booster = Booster { handle };
-        // booster.set_params(params)?;
         booster.set_param_from_json(keys, values);
         Ok(booster)
     }
@@ -239,10 +237,15 @@ impl Booster {
         Ok(bst)
     }
 
-    pub fn my_train(params: &TrainingParameters, keys: Vec<&str>, values: Vec<&str>) -> XGBResult<Self> {
+pub fn my_train(
+        evaluation_sets: Option<&[(&DMatrix, &str)]>,
+        dtrain: &DMatrix,
+        keys: Vec<&str>,
+        values: Vec<&str>,
+    ) -> XGBResult<Self> {
         let cached_dmats = {
-            let mut dmats = vec![params.dtrain];
-            if let Some(eval_sets) = params.evaluation_sets {
+            let mut dmats = vec![dtrain];
+            if let Some(eval_sets) = evaluation_sets {
                 for (dmat, _) in eval_sets {
                     dmats.push(*dmat);
                 }
@@ -250,27 +253,13 @@ impl Booster {
             dmats
         };
 
-        // let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
-        let mut bst = Booster::new_with_json_config(&params.booster_params, &cached_dmats, keys, values)?;
-
+        let mut bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
 
         for i in 0..16 {
-            bst.update(params.dtrain, i)?;
+            bst.update(dtrain, i)?;
 
-            if let Some(eval_sets) = params.evaluation_sets {
-                let mut dmat_eval_results = bst.eval_set(eval_sets, i)?;
-
-                if let Some(eval_fn) = params.custom_evaluation_fn {
-                    let eval_name = "custom";
-                    for (dmat, dmat_name) in eval_sets {
-                        let margin = bst.predict_margin(dmat)?;
-                        let eval_result = eval_fn(&margin, dmat);
-                        let eval_results = dmat_eval_results
-                            .entry(eval_name.to_string())
-                            .or_insert_with(IndexMap::new);
-                        eval_results.insert(dmat_name.to_string(), eval_result);
-                    }
-                }
+            if let Some(eval_sets) = evaluation_sets {
+                let dmat_eval_results = bst.eval_set(eval_sets, i)?;
 
                 // convert to map of eval_name -> (dmat_name -> score)
                 let mut eval_dmat_results = BTreeMap::new();
@@ -297,6 +286,7 @@ impl Booster {
         Ok(bst)
     }
 
+    
     /// Convenience function for creating/training a new Booster.
     ///
     /// This does the following:
