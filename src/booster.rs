@@ -73,7 +73,7 @@ impl Booster {
     pub fn new_with_json_config(
         dmats: &[&DMatrix],
         keys: Vec<&str>,
-        values: Vec<&str>
+        values: Vec<&str>,
     ) -> XGBResult<Self> {
         let mut handle = ptr::null_mut();
         // TODO: check this is safe if any dmats are freed
@@ -88,7 +88,6 @@ impl Booster {
         booster.set_param_from_json(keys, values);
         Ok(booster)
     }
-
 
     /// Create a new Booster model with given parameters and list of DMatrix to cache.
     ///
@@ -237,11 +236,12 @@ impl Booster {
         Ok(bst)
     }
 
-pub fn my_train(
+    pub fn my_train(
         evaluation_sets: Option<&[(&DMatrix, &str)]>,
         dtrain: &DMatrix,
         keys: Vec<&str>,
         values: Vec<&str>,
+        bst: Option<Booster>,
     ) -> XGBResult<Self> {
         let cached_dmats = {
             let mut dmats = vec![dtrain];
@@ -253,7 +253,14 @@ pub fn my_train(
             dmats
         };
 
-        let mut bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
+        let mut bst: Booster = {
+            if let Some(booster) = bst {
+                booster
+            } else {
+                let bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
+                bst
+            }
+        };
 
         for i in 0..16 {
             bst.update(dtrain, i)?;
@@ -286,7 +293,6 @@ pub fn my_train(
         Ok(bst)
     }
 
-    
     /// Convenience function for creating/training a new Booster.
     ///
     /// This does the following:
@@ -801,8 +807,6 @@ pub fn my_train(
     }
 
     fn set_param_from_json(&mut self, keys: Vec<&str>, values: Vec<&str>) {
-        
-
         for (k, v) in zip(keys, values) {
             let name = ffi::CString::new(k).unwrap();
             let value = ffi::CString::new(v).unwrap();
