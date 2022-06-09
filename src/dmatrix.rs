@@ -1,14 +1,9 @@
 use libc::{c_float, c_uint};
-use ndarray::arr2;
-use ndarray::ArrayBase;
-use ndarray::Dim;
-use ndarray::OwnedRepr;
 use std::convert::TryInto;
-use std::os::raw::c_void;
 use std::os::unix::ffi::OsStrExt;
 use std::{ffi, path::Path, ptr, slice};
 
-use xgboost_bib::*;
+use xgboost_bib;
 
 use super::{XGBError, XGBResult};
 
@@ -17,108 +12,6 @@ static KEY_GROUP: &'static str = "group";
 static KEY_LABEL: &'static str = "label";
 static KEY_WEIGHT: &'static str = "weight";
 static KEY_BASE_MARGIN: &'static str = "base_margin";
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct DIter {
-    pub(super) handle: xgboost_bib::DataIterHandle,
-    n: usize,
-    lengths: usize,
-    cur_it: usize,
-    proxy: *mut ffi::c_void,
-    data: [[f32; 3]; 2],
-    labels: [[f32; 3]; 2],
-    // labels: ArrayBase<OwnedRepr<f32>, Dim<[usize; 2]>>,
-}
-
-impl DIter {
-    /// Construct a new instance from a DMatrixHandle created by the XGBoost C API.
-    fn new(
-        iter_handle: xgboost_bib::DataIterHandle,
-        mut proxy_handle: xgboost_bib::DMatrixHandle,
-    ) -> XGBResult<Self> {
-        let proxi = unsafe { xgboost_bib::XGProxyDMatrixCreate(&mut proxy_handle) };
-
-        let data = arr2(&[
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-            [1.0, 2.0, 3.0, 4.0, 5.0, 3.0],
-        ]);
-
-        let d = [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]];
-        let l = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]];
-
-        let labels = arr2(&[[16.0], [16.0], [16.0], [16.0], [16.0], [16.0]]);
-
-        Ok(DIter {
-            handle: iter_handle,
-            n: 2,
-            lengths: 2,
-            cur_it: 0,
-            proxy: proxy_handle,
-            data: d,
-            labels: l,
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn reset(handle: *mut ffi::c_void) {
-        let data_iter: &mut DIter = unsafe { &mut *(handle as *mut DIter) };
-
-        // println!("Setting cur_it to zero");
-        // println!("current it: {:?}", data_iter.cur_it);
-
-        data_iter.cur_it = 0;
-    }
-
-    #[no_mangle]
-    extern "C" fn next(handle: *mut ffi::c_void) -> i32 {
-        let data_iter: &mut DIter = unsafe { &mut *(handle as *mut DIter) };
-
-        if data_iter.n == data_iter.cur_it {
-            data_iter.cur_it = 0;
-            return 0;
-        } else {
-            let data_ptr: *mut ffi::c_void =
-                &mut data_iter.data[data_iter.cur_it] as *mut _ as *mut ffi::c_void;
-            let lbl_ptr: *mut ffi::c_void =
-                &mut data_iter.labels[data_iter.cur_it] as *mut _ as *mut ffi::c_void;
-
-            let data_ptr_address = data_ptr as usize;
-
-            let array_config = format!(
-                "
-                {{ \"data\": [{data_ptr_address},false], \"shape\": [3, 1], \"typestr\": \"<f4\", \"version\": 3}}
-                "
-            );
-
-            let array_config_cstr = ffi::CString::new(array_config).unwrap();
-            let field = ffi::CString::new(r#"label"#).unwrap();
-
-            let dense_data = unsafe {
-                xgboost_bib::XGProxyDMatrixSetDataDense(data_iter.proxy, array_config_cstr.as_ptr())
-            };
-            let dense_info = unsafe {
-                xgboost_bib::XGDMatrixSetDenseInfo(
-                    data_iter.proxy,
-                    field.as_ptr(),
-                    lbl_ptr,
-                    3 as u64,
-                    1,
-                )
-            };
-
-            data_iter.cur_it += 1;
-            return 1;
-        }
-    }
-    fn free(&mut self) {
-        drop(self);
-    }
-}
 
 /// Data matrix used throughout XGBoost for training/predicting [`Booster`](struct.Booster.html) models.
 ///
@@ -202,6 +95,50 @@ impl DMatrix {
         })
     }
 
+    /// Create a new `DMatrix` from slice in column-major order.
+    pub fn from_col_major_f64(
+        data: &[f64],
+        byte_size_ax_0: usize,
+        byte_size_ax_1: usize,
+        strides_ax_0: usize,
+        strides_ax_1: usize,
+    ) -> XGBResult<Self> {
+        let mut handle = ptr::null_mut();
+
+        // xg needs to know, where the first element of the data resides in memory
+        let data_ptr_address = data.as_ptr() as usize;
+
+        // most important part is the definition of the strides!
+        // also, the strides are given as the number of bytes times whatever ndarray's stride function returns.
+        // e.g. arr.strides() -> [1,10320] must be passed as [8, 82560].
+        let array_config = format!(
+            "{{
+            \"data\": [{data_ptr_address}, false], 
+            \"strides\": [{byte_size_ax_0}, {byte_size_ax_1}], 
+            \"descr\": [[\"\", \"<f8\"]], 
+            \"typestr\": \"<f8\", 
+            \"shape\": [{strides_ax_0}, {strides_ax_1}], 
+            \"version\": 3
+        }}"
+        );
+
+        let json_config = format!(
+            "
+                {{ \"missing\": NaN, \"nthread\": -1}}
+                "
+        );
+
+        let array_config_cstr = ffi::CString::new(array_config).unwrap();
+        let json_config_cstr = ffi::CString::new(json_config).unwrap();
+
+        xgb_call!(xgboost_bib::XGDMatrixCreateFromDense(
+            array_config_cstr.as_ptr(),
+            json_config_cstr.as_ptr(),
+            &mut handle
+        ))?;
+        Ok(DMatrix::new(handle)?)
+    }
+
     /// Create a new `DMatrix` from dense array in row-major order.
     ///
     /// E.g. the matrix
@@ -218,19 +155,7 @@ impl DMatrix {
     /// let num_rows = 3;
     /// let dmat = DMatrix::from_dense(data, num_rows).unwrap();
     /// ```
-    pub fn from_dense(data: &[f32], num_rows: usize) -> XGBResult<Self> {
-        let mut handle = ptr::null_mut();
-        xgb_call!(xgboost_bib::XGDMatrixCreateFromMat(
-            data.as_ptr(),
-            num_rows as xgboost_bib::bst_ulong,
-            (data.len() / num_rows) as xgboost_bib::bst_ulong,
-            0.0, // TODO: can values be missing here?
-            &mut handle
-        ))?;
-        Ok(DMatrix::new(handle)?)
-    }
-
-    pub fn from_callback(data: &[f32], num_rows: usize) -> XGBResult<Self> {
+    pub fn from_mat(data: &[f32], num_rows: usize) -> XGBResult<Self> {
         let mut handle = ptr::null_mut();
         xgb_call!(xgboost_bib::XGDMatrixCreateFromMat(
             data.as_ptr(),
@@ -302,31 +227,6 @@ impl DMatrix {
             &mut handle
         ))?;
         Ok(DMatrix::new(handle)?)
-    }
-
-    pub fn from_iter() -> XGBResult<Self> {
-        let iter_handle = ptr::null_mut();
-        let proxy_handle = ptr::null_mut();
-        let mut iter = DIter::new(iter_handle, proxy_handle).unwrap();
-
-        let iter_ptr: *mut ffi::c_void = &mut iter as *mut _ as *mut ffi::c_void;
-
-        let config = ffi::CString::new("{\"missing\": NaN, \"cache_prefix\": \"cache\"}").unwrap();
-        let mut dm_handle: DMatrixHandle = ptr::null_mut();
-
-        let from_callback = unsafe {
-            xgboost_bib::XGDMatrixCreateFromCallback(
-                iter_ptr,
-                iter.proxy,
-                Some(DIter::reset),
-                Some(DIter::next),
-                config.as_ptr(),
-                &mut dm_handle,
-            )
-        };
-
-        let dm = DMatrix::new(dm_handle).unwrap();
-        Ok(dm)
     }
 
     /// Create a new `DMatrix` from given file.
@@ -514,15 +414,8 @@ impl Drop for DMatrix {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        parameters::{self, learning, tree, BoosterParameters},
-        Booster,
-    };
-
     use super::*;
-    use ndarray::arr2;
     use tempfile;
-    use xgboost_bib::{XGBoosterEvalOneIter, XGBoosterUpdateOneIter};
     fn read_train_matrix() -> XGBResult<DMatrix> {
         println!("loading mat");
         DMatrix::load("data.csv?format=csv")
@@ -677,138 +570,5 @@ mod tests {
         assert_eq!(dmat.slice(&[0, 1, 2]).unwrap().shape(), (3, 3));
         assert_eq!(dmat.slice(&[3, 2, 1]).unwrap().shape(), (3, 3));
     }
-
-    // ---------------------------------------------------------------------
-    #[test]
-    fn external_mem() {
-        let X = arr2(&[
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-            [1.0, 5.0, 10.0],
-        ]);
-
-        let y = arr2(&[
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-            [16.0],
-        ]);
-
-        // let mut booster = Booster::new(&params).unwrap();
-        let train_shape = X.raw_dim();
-        let num_rows_train = train_shape[0];
-
-        let mut dm = DMatrix::from_dense(
-            X.into_shape(train_shape[0] * train_shape[1])
-                .unwrap()
-                .as_slice()
-                .unwrap(),
-            num_rows_train,
-        )
-        .unwrap();
-
-        dm.set_labels(y.as_slice().unwrap()).unwrap();
-
-        let mut booster =
-            Booster::new_with_cached_dmats(&BoosterParameters::default(), &[&dm]).unwrap();
-
-        let l = dm.get_labels().unwrap();
-        println!("{:?}", l);
-        for i in 0..2 {
-            booster.update(&dm, i).unwrap();
-            let eval = booster.evaluate(&dm).unwrap();
-            println!("{:?}", eval);
-        }
-
-        booster.save(Path::new(&String::from("dm.json"))).unwrap();
-        drop(booster);
-    }
-    fn train_model(xy: DMatrix) {
-        let mut s = vec![xy.handle];
-        let mut bst_handle = ptr::null_mut();
-        let _booster_create =
-            unsafe { xgboost_bib::XGBoosterCreate(s.as_ptr(), 1, &mut bst_handle) };
-
-        let name_cstr = ffi::CString::new("tree_method").unwrap();
-        let value_cstr = ffi::CString::new("approx").unwrap();
-
-        let _booster_set_param = unsafe {
-            xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
-        };
-
-        let name_cstr = ffi::CString::new("objective").unwrap();
-        let value_cstr = ffi::CString::new("reg:squarederror").unwrap();
-
-        let _booster_set_param = unsafe {
-            xgboost_bib::XGBoosterSetParam(bst_handle, name_cstr.as_ptr(), value_cstr.as_ptr())
-        };
-
-        // TODO:
-        // let mut evnames: Vec<ffi::CString> = Vec::with_capacity(names.len());
-        let tr = ffi::CString::new("train").unwrap();
-        let mut validation_names: Vec<*const libc::c_char> = vec![tr.as_ptr()];
-
-        let mut validation_result = ptr::null();
-
-        for i in 0..10 {
-            unsafe {
-                xgboost_bib::XGBoosterUpdateOneIter(bst_handle, i, xy.handle);
-                xgboost_bib::XGBoosterEvalOneIter(
-                    bst_handle,
-                    i,
-                    s.as_mut_ptr(),
-                    validation_names.as_mut_ptr(),
-                    1,
-                    &mut validation_result,
-                );
-            }
-
-            let out = unsafe {
-                ffi::CStr::from_ptr(validation_result)
-                    .to_str()
-                    .unwrap()
-                    .to_owned()
-            };
-
-            println!("{}", out);
-        }
-    }
-    #[test]
-    fn mainy() {
-        let dm = DMatrix::from_iter().unwrap();
-        train_model(dm);
-    }
 }
+
