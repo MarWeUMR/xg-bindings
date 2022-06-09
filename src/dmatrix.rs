@@ -95,6 +95,50 @@ impl DMatrix {
         })
     }
 
+    /// Create a new `DMatrix` from slice in column-major order.
+    pub fn from_col_major_f64(
+        data: &[f64],
+        byte_size_ax_0: usize,
+        byte_size_ax_1: usize,
+        strides_ax_0: usize,
+        strides_ax_1: usize,
+    ) -> XGBResult<Self> {
+        let mut handle = ptr::null_mut();
+
+        // xg needs to know, where the first element of the data resides in memory
+        let data_ptr_address = data.as_ptr() as usize;
+
+        // most important part is the definition of the strides!
+        // also, the strides are given as the number of bytes times whatever ndarray's stride function returns.
+        // e.g. arr.strides() -> [1,10320] must be passed as [8, 82560].
+        let array_config = format!(
+            "{{
+            \"data\": [{data_ptr_address}, false], 
+            \"strides\": [{byte_size_ax_0}, {byte_size_ax_1}], 
+            \"descr\": [[\"\", \"<f8\"]], 
+            \"typestr\": \"<f8\", 
+            \"shape\": [{strides_ax_0}, {strides_ax_1}], 
+            \"version\": 3
+        }}"
+        );
+
+        let json_config = format!(
+            "
+                {{ \"missing\": NaN, \"nthread\": -1}}
+                "
+        );
+
+        let array_config_cstr = ffi::CString::new(array_config).unwrap();
+        let json_config_cstr = ffi::CString::new(json_config).unwrap();
+
+        xgb_call!(xgboost_bib::XGDMatrixCreateFromDense(
+            array_config_cstr.as_ptr(),
+            json_config_cstr.as_ptr(),
+            &mut handle
+        ))?;
+        Ok(DMatrix::new(handle)?)
+    }
+
     /// Create a new `DMatrix` from dense array in row-major order.
     ///
     /// E.g. the matrix
