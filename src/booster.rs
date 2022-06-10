@@ -254,7 +254,8 @@ impl Booster {
         };
 
         let mut bst: Booster = {
-            if let Some(booster) = bst {
+            if let Some(mut booster) = bst {
+                booster.set_param_from_json(keys, values);
                 booster
             } else {
                 let bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
