@@ -3,6 +3,7 @@ use crate::error::XGBError;
 use indexmap::IndexMap;
 use libc;
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::iter::zip;
 use std::os::unix::ffi::OsStrExt;
