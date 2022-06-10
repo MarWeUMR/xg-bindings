@@ -8,7 +8,6 @@ use std::iter::zip;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
 use std::{ffi, fmt, fs::File, ptr, slice};
 use tempfile;
 use xgboost_bib;
@@ -390,7 +389,7 @@ impl Booster {
         Ok(bst)
     }
 
-    pub fn save_config(&self) {
+    pub fn save_config(&self) -> String {
         /*
         json_string = ctypes.c_char_p()
         length = c_bst_ulong()
@@ -419,7 +418,8 @@ impl Booster {
         };
 
         println!("{}", json);
-        println!("{}", out);
+        println!("{}", out.clone());
+        out
     }
 
     /// Update this Booster's parameters.
