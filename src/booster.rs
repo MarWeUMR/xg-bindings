@@ -264,6 +264,8 @@ impl Booster {
 
         for i in 0..16 {
             bst.update(dtrain, i)?;
+            let c = bst.save_config();
+            fs::write("config_rust.json", c).expect("write config file");
 
             if let Some(eval_sets) = evaluation_sets {
                 let dmat_eval_results = bst.eval_set(eval_sets, i)?;
