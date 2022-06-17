@@ -255,8 +255,36 @@ impl Booster {
 
         let mut bst: Booster = {
             if let Some(mut booster) = bst {
-                booster.set_param_from_json(keys, values);
-                booster
+                let mut length: u64 = 0;
+                let mut buffer_string = ptr::null();
+
+                let _ = xgb_call!(xgboost_bib::XGBoosterSerializeToBuffer(
+                    booster.handle,
+                    &mut length,
+                    &mut buffer_string
+                ));
+
+                let mut bst_handle = ptr::null_mut();
+
+                let s: Vec<xgboost_bib::DMatrixHandle> =
+                    cached_dmats.iter().map(|x| x.handle).collect();
+
+                xgb_call!(xgboost_bib::XGBoosterCreate(
+                    s.as_ptr(),
+                    cached_dmats.len() as u64,
+                    &mut bst_handle
+                ))?;
+
+                let mut boostery = Booster { handle: bst_handle };
+
+                let _ = xgb_call!(xgboost_bib::XGBoosterUnserializeFromBuffer(
+                    boostery.handle,
+                    buffer_string as *mut ffi::c_void,
+                    length,
+                ));
+
+                boostery.set_param_from_json(keys, values);
+                boostery
             } else {
                 let bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
                 bst
