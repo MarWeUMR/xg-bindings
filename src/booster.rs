@@ -841,12 +841,9 @@ impl Booster {
             let name = ffi::CString::new(k).unwrap();
             let value = ffi::CString::new(v).unwrap();
 
-            println!("setting {:?} to {:?}", k, v);
-
             let setting_ok = unsafe {
                 xgboost_bib::XGBoosterSetParam(self.handle, name.as_ptr(), value.as_ptr())
             };
-            println!("setting ok? {:?}", setting_ok);
         }
     }
 
