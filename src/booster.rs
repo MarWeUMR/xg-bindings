@@ -318,7 +318,6 @@ impl Booster {
             }
         }
 
-        bst.save_config();
         Ok(bst)
     }
 
