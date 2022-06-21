@@ -266,11 +266,11 @@ impl Booster {
 
                 let mut bst_handle = ptr::null_mut();
 
-                let s: Vec<xgboost_bib::DMatrixHandle> =
+                let cached_dmat_handles: Vec<xgboost_bib::DMatrixHandle> =
                     cached_dmats.iter().map(|x| x.handle).collect();
 
                 xgb_call!(xgboost_bib::XGBoosterCreate(
-                    s.as_ptr(),
+                    cached_dmat_handles.as_ptr(),
                     cached_dmats.len() as u64,
                     &mut bst_handle
                 ))?;
