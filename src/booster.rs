@@ -254,7 +254,7 @@ impl Booster {
         };
 
         let mut bst: Booster = {
-            if let Some(mut booster) = bst {
+            if let Some(booster) = bst {
                 let mut length: u64 = 0;
                 let mut buffer_string = ptr::null();
 
@@ -275,16 +275,16 @@ impl Booster {
                     &mut bst_handle
                 ))?;
 
-                let mut boostery = Booster { handle: bst_handle };
+                let mut bst_unserialize = Booster { handle: bst_handle };
 
                 let _ = xgb_call!(xgboost_bib::XGBoosterUnserializeFromBuffer(
-                    boostery.handle,
+                    bst_unserialize.handle,
                     buffer_string as *mut ffi::c_void,
                     length,
                 ));
 
-                boostery.set_param_from_json(keys, values);
-                boostery
+                bst_unserialize.set_param_from_json(keys, values);
+                bst_unserialize
             } else {
                 let bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
                 bst
