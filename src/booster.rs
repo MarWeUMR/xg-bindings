@@ -72,8 +72,8 @@ impl Booster {
 
     pub fn new_with_json_config(
         dmats: &[&DMatrix],
-        keys: Vec<&str>,
-        values: Vec<&str>,
+        
+        config: HashMap<&str, &str>
     ) -> XGBResult<Self> {
         let mut handle = ptr::null_mut();
         // TODO: check this is safe if any dmats are freed
@@ -85,7 +85,7 @@ impl Booster {
         ))?;
 
         let mut booster = Booster { handle };
-        booster.set_param_from_json(keys, values);
+        booster.set_param_from_json(config);
         Ok(booster)
     }
 
@@ -236,11 +236,10 @@ impl Booster {
         Ok(bst)
     }
 
-    pub fn my_train(
+    pub fn train(
         evaluation_sets: Option<&[(&DMatrix, &str)]>,
         dtrain: &DMatrix,
-        keys: Vec<&str>,
-        values: Vec<&str>,
+        config: HashMap<&str, &str>,
         bst: Option<Booster>,
     ) -> XGBResult<Self> {
         let cached_dmats = {
@@ -283,10 +282,10 @@ impl Booster {
                     length,
                 ));
 
-                bst_unserialize.set_param_from_json(keys, values);
+                bst_unserialize.set_param_from_json(config);
                 bst_unserialize
             } else {
-                let bst = Booster::new_with_json_config(&cached_dmats, keys, values)?;
+                let bst = Booster::new_with_json_config(&cached_dmats, config)?;
                 bst
             }
         };
@@ -321,101 +320,7 @@ impl Booster {
         Ok(bst)
     }
 
-    /// Convenience function for creating/training a new Booster.
-    ///
-    /// This does the following:
-    ///
-    /// 1. create a new Booster model with given parameters
-    /// 2. train the model with given DMatrix
-    /// 3. print out evaluation results for each training round
-    /// 4. return trained Booster
-    ///
-    /// * `params` - training parameters
-    /// * `dtrain` - matrix to train Booster with
-    /// * `num_boost_round` - number of training iterations
-    /// * `eval_sets` - list of datasets to evaluate after each boosting round
-    pub fn train(params: &TrainingParameters) -> XGBResult<Self> {
-        let cached_dmats = {
-            let mut dmats = vec![params.dtrain];
-            if let Some(eval_sets) = params.evaluation_sets {
-                for (dmat, _) in eval_sets {
-                    dmats.push(*dmat);
-                }
-            }
-            dmats
-        };
-
-        let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
-        //let num_parallel_tree = 1;
-
-        // load distributed code checkpoint from rabit
-        let version = bst.load_rabit_checkpoint()?;
-        debug!("Loaded Rabit checkpoint: version={}", version);
-        assert!(unsafe { xgboost_bib::RabitGetWorldSize() != 1 || version == 0 });
-
-        let _rank = unsafe { xgboost_bib::RabitGetRank() };
-        let start_iteration = version / 2;
-        //let mut nboost = start_iteration;
-
-        for i in start_iteration..params.boost_rounds as i32 {
-            // distributed code: need to resume to this point
-            // skip first update if a recovery step
-            if version % 2 == 0 {
-                if let Some(objective_fn) = params.custom_objective_fn {
-                    debug!("Boosting in round: {}", i);
-                    bst.update_custom(params.dtrain, objective_fn)?;
-                } else {
-                    debug!("Updating in round: {}", i);
-                    bst.update(params.dtrain, i)?;
-                }
-                bst.save_rabit_checkpoint()?;
-            }
-
-            assert!(unsafe {
-                xgboost_bib::RabitGetWorldSize() == 1
-                    || version == xgboost_bib::RabitVersionNumber()
-            });
-
-            //nboost += 1;
-
-            if let Some(eval_sets) = params.evaluation_sets {
-                let mut dmat_eval_results = bst.eval_set(eval_sets, i)?;
-
-                if let Some(eval_fn) = params.custom_evaluation_fn {
-                    let eval_name = "custom";
-                    for (dmat, dmat_name) in eval_sets {
-                        let margin = bst.predict_margin(dmat)?;
-                        let eval_result = eval_fn(&margin, dmat);
-                        let eval_results = dmat_eval_results
-                            .entry(eval_name.to_string())
-                            .or_insert_with(IndexMap::new);
-                        eval_results.insert(dmat_name.to_string(), eval_result);
-                    }
-                }
-
-                // convert to map of eval_name -> (dmat_name -> score)
-                let mut eval_dmat_results = BTreeMap::new();
-                for (dmat_name, eval_results) in &dmat_eval_results {
-                    for (eval_name, result) in eval_results {
-                        let dmat_results = eval_dmat_results
-                            .entry(eval_name)
-                            .or_insert_with(BTreeMap::new);
-                        dmat_results.insert(dmat_name, result);
-                    }
-                }
-
-                print!("[{}]", i);
-                for (eval_name, dmat_results) in eval_dmat_results {
-                    for (dmat_name, result) in dmat_results {
-                        print!("\t{}-{}:{}", dmat_name, eval_name, result);
-                    }
-                }
-                println!();
-            }
-        }
-
-        Ok(bst)
-    }
+    
 
     pub fn save_config(&self) -> String {
         /*
@@ -835,8 +740,9 @@ impl Booster {
         xgb_call!(xgboost_bib::XGBoosterSaveRabitCheckpoint(self.handle))
     }
 
-    fn set_param_from_json(&mut self, keys: Vec<&str>, values: Vec<&str>) {
-        for (k, v) in zip(keys, values) {
+    fn set_param_from_json(&mut self, config: HashMap<&str, &str>) {
+
+        for (k, v) in config.into_iter() {
             let name = ffi::CString::new(k).unwrap();
             let value = ffi::CString::new(v).unwrap();
 
@@ -844,6 +750,15 @@ impl Booster {
                 xgboost_bib::XGBoosterSetParam(self.handle, name.as_ptr(), value.as_ptr())
             };
         }
+
+        // for (k, v) in zip(keys, values) {
+        //     let name = ffi::CString::new(k).unwrap();
+        //     let value = ffi::CString::new(v).unwrap();
+        //
+        //     let setting_ok = unsafe {
+        //         xgboost_bib::XGBoosterSetParam(self.handle, name.as_ptr(), value.as_ptr())
+        //     };
+        // }
     }
 
     fn set_param(&mut self, name: &str, value: &str) -> XGBResult<()> {
