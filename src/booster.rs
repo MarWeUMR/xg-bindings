@@ -59,6 +59,8 @@ pub struct Booster {
     handle: xgboost_bib::BoosterHandle,
 }
 
+unsafe impl Send for Booster {}
+
 impl Booster {
     /// Create a new Booster model with given parameters.
     ///
