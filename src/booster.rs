@@ -60,6 +60,7 @@ pub struct Booster {
 }
 
 unsafe impl Send for Booster {}
+unsafe impl Sync for Booster {}
 
 impl Booster {
     /// Create a new Booster model with given parameters.
