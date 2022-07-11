@@ -552,7 +552,6 @@ impl Booster {
 
         assert!(!out_result.is_null());
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
-        println!("prediction done");
         Ok(data)
     }
 
