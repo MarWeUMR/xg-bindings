@@ -75,6 +75,9 @@ pub struct DMatrix {
     num_cols: usize,
 }
 
+unsafe impl Send for DMatrix {}
+unsafe impl Sync for DMatrix {}
+
 impl DMatrix {
     /// Construct a new instance from a DMatrixHandle created by the XGBoost C API.
     fn new(handle: xgboost_bib::DMatrixHandle) -> XGBResult<Self> {
