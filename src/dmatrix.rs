@@ -103,8 +103,8 @@ impl DMatrix {
         data: &[f64],
         byte_size_ax_0: usize,
         byte_size_ax_1: usize,
-        strides_ax_0: usize,
-        strides_ax_1: usize,
+        n_rows: usize,
+        n_cols: usize,
         n_thread: i32,
         nan: f64
     ) -> XGBResult<Self> {
