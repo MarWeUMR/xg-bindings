@@ -2292,6 +2292,7 @@ mod tests {
             byte_size_ax_1,
             100,
             9,
+            -1
         )
         .unwrap();
 
