@@ -106,6 +106,7 @@ impl DMatrix {
         strides_ax_0: usize,
         strides_ax_1: usize,
         n_thread: i32,
+        nan: f64
     ) -> XGBResult<Self> {
         let mut handle = ptr::null_mut();
 
@@ -128,7 +129,7 @@ impl DMatrix {
 
         let json_config = format!(
             "
-                {{ \"missing\": NaN, \"nthread\": {n_thread}}}
+                {{ \"missing\": {nan}, \"nthread\": {n_thread}}}
                 "
         );
 

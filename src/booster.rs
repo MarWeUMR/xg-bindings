@@ -2292,7 +2292,8 @@ mod tests {
             byte_size_ax_1,
             100,
             9,
-            -1
+            -1,
+            f64::NAN
         )
         .unwrap();
 
@@ -2557,6 +2558,8 @@ mod tests {
             byte_size_ax_1,
             20,
             9,
+            -1,
+            f64::NAN
         )
         .unwrap();
 
