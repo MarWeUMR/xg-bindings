@@ -55,6 +55,7 @@ impl PredictOption {
 /// [`new_with_cached_dmats`](struct.Booster.html#method.new_with_cached_dmats), then trained by calling
 /// [`update`](struct.Booster.html#method.update) or [`update_custom`](struct.Booster.html#method.update_custom)
 /// in a loop.
+#[derive(Clone)]
 pub struct Booster {
     handle: xgboost_bib::BoosterHandle,
 }
