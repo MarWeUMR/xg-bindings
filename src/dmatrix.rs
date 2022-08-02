@@ -122,7 +122,7 @@ impl DMatrix {
             \"strides\": [{byte_size_ax_0}, {byte_size_ax_1}], 
             \"descr\": [[\"\", \"<f8\"]], 
             \"typestr\": \"<f8\", 
-            \"shape\": [{strides_ax_0}, {strides_ax_1}], 
+            \"shape\": [{n_rows}, {n_cols}], 
             \"version\": 3
         }}"
         );
